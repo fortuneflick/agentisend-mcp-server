@@ -1,0 +1,55 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.fortuneflick/agentisend",
+  "title": "AgentiSend",
+  "description": "AgentiSend is a transactional email API: send through verified domains with a message log, budgets, a preflight and refusals that name the fix; built so AI agents can send on your behalf. The hosted MCP server at https://api.agentisend.com/mcp exposes 82 tools (44 on tools/list; the rest via list_more_tools). A send is one message or a batch of up to 500 items with per-item results. preflight_email runs every gate a real send runs, sends nothing, and costs nothing. Every 4xx returns code, message, and fix. There is no tool for unsolicited mail. Auth is a bearer API key or OAuth 2.1 with dynamic client registration. Starter prompts: \"Send this receipt to the customer.\" \"Preflight this send and tell me what would stop it.\" \"What can I spend today?\"",
+  "version": "0.1.2",
+
+  "websiteUrl": "https://agentisend.com/docs/guides/mcp",
+  "repository": {
+    "url": "https://github.com/fortuneflick/agentisend",
+    "source": "github",
+    "subfolder": "packages/mcp-server"
+  },
+  "packages": [
+    {
+      "registryType": "npm",
+      "registryBaseUrl": "https://registry.npmjs.org",
+      "identifier": "@agentisend/mcp-server",
+      "version": "0.1.2",
+      "transport": { "type": "stdio" },
+      "environmentVariables": [
+        {
+          "name": "AGENTISEND_API_KEY",
+          "description": "Your AgentiSend API key. Read from the environment only, never passed as an argument, because process arguments are visible to every other process on the machine.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        },
+        {
+          "name": "AGENTISEND_MCP_URL",
+          "description": "The hosted endpoint this launcher proxies to. Defaults to https://api.agentisend.com/mcp.",
+          "isRequired": false,
+          "isSecret": false,
+          "default": "https://api.agentisend.com/mcp",
+          "format": "string"
+        }
+      ]
+    }
+  ],
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://api.agentisend.com/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Bearer <your API key>. OAuth 2.1 reaches the same tools with the same ceilings.",
+          "isRequired": true,
+          "isSecret": true,
+          "format": "string"
+        }
+      ]
+    }
+  ]
+}

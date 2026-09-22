@@ -1,0 +1,62 @@
+{
+  "name": "@agentisend/mcp-server",
+  "mcpName": "io.github.fortuneflick/agentisend",
+  "version": "0.1.2",
+  "description": "AgentiSend is a transactional email API: send through verified domains with a message log, budgets, a preflight and refusals that name the fix; built so AI agents can send on your behalf. The hosted MCP server at https://api.agentisend.com/mcp exposes 82 tools (44 on tools/list; the rest via list_more_tools). A send is one message or a batch of up to 500 items with per-item results. preflight_email runs every gate a real send runs, sends nothing, and costs nothing. Every 4xx returns code, message, and fix. There is no tool for unsolicited mail. Auth is a bearer API key or OAuth 2.1 with dynamic client registration. Starter prompts: \"Send this receipt to the customer.\" \"Preflight this send and tell me what would stop it.\" \"What can I spend today?\"",
+  "type": "module",
+  "license": "MIT",
+  "homepage": "https://agentisend.com/docs",
+  "bugs": {
+    "email": "hello@agentisend.com"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/fortuneflick/agentisend-mcp-server.git"
+  },
+  "keywords": [
+    "MCP server",
+    "MCP connector",
+    "transactional email API",
+    "transactional email",
+    "AI agents",
+    "email API",
+    "Claude",
+    "Cursor",
+    "agent budget",
+    "sending domain"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "bin": {
+    "agentisend-mcp": "dist/cli.js"
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "server.json"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.6.0",
+    "vitest": "^3.0.0"
+  }
+}
