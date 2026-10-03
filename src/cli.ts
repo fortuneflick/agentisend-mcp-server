@@ -65,7 +65,7 @@ export async function main(
   const url = env['AGENTISEND_MCP_URL'] ?? DEFAULT_URL;
   try {
     const upstream = await connectUpstream({ url, apiKey });
-    const server = createProxyServer(upstream);
+    const server = createProxyServer(upstream, { url, apiKey });
     await server.connect(new StdioServerTransport());
     process.stderr.write(`agentisend-mcp connected to ${url}\n`);
     return 0;

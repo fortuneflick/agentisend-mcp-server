@@ -14,7 +14,10 @@
  * adds is the transport.
  */
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
-import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
+import {
+  StreamableHTTPClientTransport,
+  StreamableHTTPError,
+} from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import {
   CallToolRequestSchema,
@@ -23,6 +26,7 @@ import {
   ListResourcesRequestSchema,
   ListToolsRequestSchema,
   ReadResourceRequestSchema,
+  ToolListChangedNotificationSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
@@ -38,7 +42,7 @@ export interface ProxyOptions {
   clientTransportFactory?: (url: URL, apiKey: string) => Transport;
 }
 
-/** The upstream connection, opened once and reused for every forwarded call. */
+/** One upstream connection, reused for every forwarded call until the hosted server ends it. */
 export async function connectUpstream(options: ProxyOptions): Promise<Client> {
   const client = new Client(
     { name: SERVER_NAME, version: SERVER_VERSION },
@@ -55,36 +59,154 @@ export async function connectUpstream(options: ProxyOptions): Promise<Client> {
 }
 
 /**
+ * DX-4: the upstream said this connection is gone. Sessions live in the API
+ * process, so a deploy or 30 idle minutes ends them, and the API answers 404
+ * (session_expired / session_not_found). A request refused that way ran
+ * nothing, so it is safe to open a fresh connection and send it again.
+ */
+function sessionGone(err: unknown): boolean {
+  return err instanceof StreamableHTTPError && err.code === 404;
+}
+
+/**
+ * The API was not listening (a restart window). The request never left this
+ * machine, so replaying it cannot run anything twice. Any other network
+ * failure might have reached the server, so it is not replayed.
+ */
+function neverSent(err: unknown): boolean {
+  let cause: unknown = err;
+  for (let depth = 0; depth < 4 && cause instanceof Error; depth += 1) {
+    if ((cause as { code?: unknown }).code === 'ECONNREFUSED') return true;
+    cause = (cause as { cause?: unknown }).cause;
+  }
+  return false;
+}
+
+/**
  * A server that answers every request by asking the hosted one.
  *
  * Errors are forwarded as they arrive rather than being reshaped: the whole
  * value of the hosted error catalogue is its `fix` field, and a proxy that
  * rewrote refusals into its own words would throw that away at exactly the
  * moment the agent needs it.
+ *
+ * DX-4: it says what the hosted server says at initialize (its
+ * `instructions`), passes on `notifications/tools/list_changed`, and, given
+ * the options it connected with, opens a fresh upstream connection when the
+ * hosted one is gone instead of failing every call until the host restarts.
  */
-export function createProxyServer(upstream: Client): Server {
+export function createProxyServer(first: Client, options?: ProxyOptions): Server {
+  let upstream = first;
+  let reconnecting: Promise<Client> | null = null;
+  /**
+   * `list_more_tools` calls that added tools to the upstream session's list.
+   * A fresh session starts at the default list, so they are replayed on it.
+   */
+  const moreToolsCalls = new Map<string, Record<string, unknown>>();
+
+  const instructions = first.getInstructions();
   const server = new Server(
     { name: SERVER_NAME, version: SERVER_VERSION },
-    { capabilities: { tools: {}, resources: {}, prompts: {} } },
+    {
+      capabilities: { tools: { listChanged: true }, resources: {}, prompts: {} },
+      ...(instructions !== undefined ? { instructions } : {}),
+    },
   );
 
-  server.setRequestHandler(ListToolsRequestSchema, async () => await upstream.listTools());
-  server.setRequestHandler(CallToolRequestSchema, async (request) =>
-    upstream.callTool({
-      name: request.params.name,
-      arguments: (request.params.arguments ?? {}) as Record<string, unknown>,
-    }),
+  const forwardListChanges = (client: Client): void => {
+    client.setNotificationHandler(ToolListChangedNotificationSchema, async () => {
+      await server.sendToolListChanged();
+    });
+  };
+  forwardListChanges(first);
+
+  /**
+   * Calls still waiting on each connection. A replaced connection is closed
+   * only once none are: closing it earlier would cut off a call that may
+   * already have run, and that call must not be replayed.
+   */
+  const inFlight = new Map<Client, number>();
+  const retireIfIdle = (client: Client): void => {
+    if (client === upstream || (inFlight.get(client) ?? 0) > 0) return;
+    inFlight.delete(client);
+    void client.close().catch(() => undefined);
+  };
+
+  /** One reconnect for every call that met the same dead connection. */
+  function reconnect(stale: Client, connectOptions: ProxyOptions): Promise<Client> {
+    if (upstream !== stale) return Promise.resolve(upstream);
+    reconnecting ??= (async () => {
+      try {
+        const fresh = await connectUpstream(connectOptions);
+        forwardListChanges(fresh);
+        try {
+          for (const args of moreToolsCalls.values()) {
+            await fresh.callTool({ name: 'list_more_tools', arguments: args });
+          }
+        } catch (err) {
+          // Not adopted, so nothing else would ever close it.
+          void fresh.close().catch(() => undefined);
+          throw err;
+        }
+        upstream = fresh;
+        retireIfIdle(stale);
+        return fresh;
+      } finally {
+        reconnecting = null;
+      }
+    })();
+    return reconnecting;
+  }
+
+  async function on<T>(client: Client, call: (client: Client) => Promise<T>): Promise<T> {
+    inFlight.set(client, (inFlight.get(client) ?? 0) + 1);
+    try {
+      return await call(client);
+    } finally {
+      inFlight.set(client, (inFlight.get(client) ?? 1) - 1);
+      retireIfIdle(client);
+    }
+  }
+
+  async function withUpstream<T>(call: (client: Client) => Promise<T>): Promise<T> {
+    const client = reconnecting !== null ? await reconnecting : upstream;
+    try {
+      return await on(client, call);
+    } catch (err) {
+      if (!options || !(sessionGone(err) || neverSent(err))) throw err;
+      return on(await reconnect(client, options), call);
+    }
+  }
+
+  server.setRequestHandler(ListToolsRequestSchema, async () =>
+    withUpstream((client) => client.listTools()),
   );
-  server.setRequestHandler(ListResourcesRequestSchema, async () => await upstream.listResources());
+  server.setRequestHandler(CallToolRequestSchema, async (request) => {
+    const args = (request.params.arguments ?? {}) as Record<string, unknown>;
+    const result = await withUpstream((client) =>
+      client.callTool({ name: request.params.name, arguments: args }),
+    );
+    if (request.params.name === 'list_more_tools' && result.isError !== true) {
+      moreToolsCalls.set(JSON.stringify(args), args);
+    }
+    return result;
+  });
+  server.setRequestHandler(ListResourcesRequestSchema, async () =>
+    withUpstream((client) => client.listResources()),
+  );
   server.setRequestHandler(ReadResourceRequestSchema, async (request) =>
-    upstream.readResource({ uri: request.params.uri }),
+    withUpstream((client) => client.readResource({ uri: request.params.uri })),
   );
-  server.setRequestHandler(ListPromptsRequestSchema, async () => await upstream.listPrompts());
+  server.setRequestHandler(ListPromptsRequestSchema, async () =>
+    withUpstream((client) => client.listPrompts()),
+  );
   server.setRequestHandler(GetPromptRequestSchema, async (request) =>
-    upstream.getPrompt({
-      name: request.params.name,
-      ...(request.params.arguments !== undefined ? { arguments: request.params.arguments } : {}),
-    }),
+    withUpstream((client) =>
+      client.getPrompt({
+        name: request.params.name,
+        ...(request.params.arguments !== undefined ? { arguments: request.params.arguments } : {}),
+      }),
+    ),
   );
 
   return server;
