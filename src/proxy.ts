@@ -31,7 +31,7 @@ import {
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
 
 export const SERVER_NAME = 'agentisend-local';
-export const SERVER_VERSION = '0.1.2';
+export const SERVER_VERSION = '0.1.3';
 
 export interface ProxyOptions {
   /** Where the hosted MCP endpoint lives, e.g. https://api.agentisend.com/mcp */

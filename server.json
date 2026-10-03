@@ -3,7 +3,7 @@
   "name": "io.github.fortuneflick/agentisend",
   "title": "AgentiSend",
   "description": "AgentiSend is a transactional email API for AI agents: send receipts, password resets, sign-in codes and alerts from your own verified domain, with a message log, spend budgets, a free preflight and refusals that name the fix. The hosted MCP server at https://api.agentisend.com/mcp exposes 84 tools (44 on tools/list; the rest via list_more_tools) for sending, domain setup, templates, contacts, broadcasts, webhooks and delivery logs. A send is one message or a batch of up to 500 items with per-item results. preflight_email runs every gate a real send runs, sends nothing, and costs nothing. Every refusal returns a code, a message and the fix. A loop guard holds repeated sends for a person. You can cap what each agent spends, and stop all sending with a kill switch. There is no tool for unsolicited mail. Sign in with OAuth 2.1 and dynamic client registration, or use an API key. Starter prompts: \"Send this receipt to the customer.\" \"Preflight this send and tell me what would stop it.\" \"What can I spend today?\"",
-  "version": "0.1.2",
+  "version": "0.1.3",
 
   "websiteUrl": "https://agentisend.com/docs/guides/mcp",
   "repository": {
@@ -16,7 +16,7 @@
       "registryType": "npm",
       "registryBaseUrl": "https://registry.npmjs.org",
       "identifier": "@agentisend/mcp-server",
-      "version": "0.1.2",
+      "version": "0.1.3",
       "transport": { "type": "stdio" },
       "environmentVariables": [
         {
